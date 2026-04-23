@@ -4466,14 +4466,31 @@ class GatewayRunner:
         )
 
         try:
-            # Emit agent:start hook
+            # Emit agent:start hook.
+            #
+            # Handlers may append strings to ctx["context_prompt_additions"]
+            # to inject extra guidance into the system prompt for this turn
+            # (e.g. brain-first lookups per the gbrain brain-ops skill). We
+            # pass the FULL message (not the :500 preview) via ctx["message_full"]
+            # so handlers can run retrieval against the actual user query.
+            # Mutations to the context dict are honored; return values are
+            # still ignored to preserve fire-and-forget semantics elsewhere.
             hook_ctx = {
                 "platform": source.platform.value if source.platform else "",
                 "user_id": source.user_id,
                 "session_id": session_entry.session_id,
                 "message": message_text[:500],
+                "message_full": message_text,
+                "context_prompt_additions": [],
             }
             await self.hooks.emit("agent:start", hook_ctx)
+
+            # Fold any handler-provided additions into the system prompt.
+            additions = hook_ctx.get("context_prompt_additions") or []
+            if additions:
+                context_prompt = context_prompt + "\n\n" + "\n\n".join(
+                    a for a in additions if a
+                )
 
             # Run the agent
             agent_result = await self._run_agent(
